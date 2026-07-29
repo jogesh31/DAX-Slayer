@@ -1,0 +1,15 @@
+# Virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# Real model data — BIM snapshots and exported reports contain actual
+# employer measure/table names and shouldn't be published
+backups/
+dependency_report_*.json
+dax_slayer_cleanup_report_*.xlsx
+
+# Runtime logs / scratch
+server_out.log
+server_err.log
+scratch/
