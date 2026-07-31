@@ -378,7 +378,9 @@ function setActiveView(view) {
   el("viewChart").style.display = view === "chart" ? "block" : "none";
   el("viewBulk").style.display = view === "bulk" ? "block" : "none";
   el("viewOrganize").style.display = view === "organize" ? "block" : "none";
+  el("viewSnippets").style.display = view === "snippets" ? "block" : "none";
   if (view === "organize") renderOrganizeList();
+  if (view === "snippets") renderSnippets();
 }
 
 function switchToChartView() {
@@ -549,6 +551,284 @@ function loadDaxFunctions() {
     daxFunctionsLoaded = true;
   }).catch(() => {}); // reference popovers just won't resolve names if this fails — non-critical
 }
+
+// ==================== MOST USED DAX (snippet library) ====================
+//
+// A static reference library of common DAX patterns (Date table, time
+// intelligence, ranking, ...) — not tied to the connected model, just
+// something to browse and copy-paste. Fetched once and cached, same as
+// the function reference.
+
+state.snippets = null; // [{name, category, description, dax, functionsUsed}], fetched once
+state.snippetSearch = "";
+
+function renderSnippets() {
+  const list = el("snippetList");
+  if (!state.snippets) {
+    list.innerHTML = `<div class="empty-state" style="position:static;height:100%;">Loading…</div>`;
+    api("/api/dax-snippets").then((data) => {
+      state.snippets = data.snippets || [];
+      renderSnippets();
+    }).catch((e) => {
+      list.innerHTML = `<div class="empty-state" style="position:static;height:100%;">Failed to load: ${escapeHtml(e.message)}</div>`;
+    });
+    return;
+  }
+
+  const q = state.snippetSearch.trim().toLowerCase();
+  const matches = state.snippets.filter((s) =>
+    !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q) || s.category.toLowerCase().includes(q) || s.dax.toLowerCase().includes(q)
+  );
+
+  if (!matches.length) {
+    list.innerHTML = `<div class="empty-state" style="position:static;height:100%;"><div class="big">🔍</div>No patterns match "${escapeHtml(state.snippetSearch)}"</div>`;
+    return;
+  }
+
+  const byCategory = {};
+  for (const s of matches) (byCategory[s.category] ||= []).push(s);
+
+  list.innerHTML = "";
+  for (const category of Object.keys(byCategory)) {
+    const section = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "snippet-category-title";
+    title.textContent = category;
+    section.appendChild(title);
+
+    const grid = document.createElement("div");
+    grid.className = "snippet-grid";
+    for (const s of byCategory[category]) {
+      const card = document.createElement("div");
+      card.className = "snippet-card";
+      const canDeploy = s.kind === "measure" || s.kind === "column";
+      card.innerHTML = `
+        <div class="sc-name">${escapeHtml(s.name)}</div>
+        <div class="sc-desc">${escapeHtml(s.description)}</div>
+        <pre class="dax">${highlightDax(s.dax, s.functionsUsed)}</pre>
+        <div class="sc-toolbar">
+          ${canDeploy ? `<button class="sc-deploy">🚀 Deploy to Report</button>` : `<span style="font-size:11px;color:var(--text-faint);margin-right:auto;">Copy this into a new calculated table in Power BI Desktop</span>`}
+          <button class="ghost sc-copy">📋 Copy</button>
+        </div>
+      `;
+      card.querySelectorAll(".fn").forEach((elFn) => {
+        elFn.addEventListener("click", (e) => showFnPopover(e.currentTarget, e.currentTarget.dataset.fn));
+      });
+      const copyBtn = card.querySelector(".sc-copy");
+      copyBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(s.dax).then(() => {
+          copyBtn.textContent = "✓ Copied";
+          copyBtn.classList.add("copied");
+          setTimeout(() => { copyBtn.textContent = "📋 Copy"; copyBtn.classList.remove("copied"); }, 1500);
+        }).catch(() => toast("Couldn't copy — select the text manually.", "error"));
+      });
+      const deployBtn = card.querySelector(".sc-deploy");
+      if (deployBtn) deployBtn.addEventListener("click", () => openSnippetDeployModal(s));
+      grid.appendChild(card);
+    }
+    section.appendChild(grid);
+    list.appendChild(section);
+  }
+}
+
+el("snippetSearchInput").addEventListener("input", (e) => {
+  state.snippetSearch = e.target.value;
+  renderSnippets();
+});
+
+// ==================== SNIPPET DEPLOY MODAL + AUTOCOMPLETE ====================
+//
+// The templates in the snippet library reference placeholder tables/columns
+// (Sales[Amount], 'Date'[Date], ...) that won't exist in the user's real
+// model. This modal lets them rename the object, pick a real target table,
+// and edit the DAX with Power-BI-style autocomplete pulled from the
+// already-connected model (state.model.nodes) — no extra API call needed.
+
+function openSnippetDeployModal(snippet) {
+  el("snippetDeployKindLabel").textContent = snippet.kind === "column" ? "Column name" : "Measure name";
+  el("snippetDeployName").value = snippet.defaultObjectName;
+  el("snippetDeployExpr").value = snippet.expression;
+  el("snippetDeployWarning").style.display = "none";
+
+  const tableSelect = el("snippetDeployTable");
+  const tables = (state.model?.nodes || []).filter((n) => n.type === "table").map((n) => n.name).sort();
+  tableSelect.innerHTML = tables.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+  if (!tables.length) {
+    el("snippetDeployWarning").style.display = "block";
+    el("snippetDeployWarning").textContent = "No tables found — connect and analyze a report first.";
+  }
+
+  el("snippetDeployModal").classList.add("show");
+  el("snippetDeployExpr").focus();
+
+  el("snippetDeployConfirm").onclick = async () => {
+    const kind = snippet.kind;
+    const table = tableSelect.value;
+    const name = el("snippetDeployName").value.trim();
+    const expression = el("snippetDeployExpr").value.trim();
+    if (!table || !name || !expression) {
+      toast("Fill in a name, table, and expression before deploying.", "error");
+      return;
+    }
+    el("snippetDeployConfirm").disabled = true;
+    try {
+      const res = await api("/api/deploy-snippet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, table, name, expression }),
+      });
+      el("snippetDeployModal").classList.remove("show");
+      toast(`Deployed "${res.name}" to ${res.table}. Backup: ${res.backup}`, "success");
+      await analyze(); // pulls the new object into the sidebar/stats immediately
+    } catch (e) {
+      toast("Deploy failed: " + e.message, "error");
+    } finally {
+      el("snippetDeployConfirm").disabled = false;
+    }
+  };
+}
+
+el("snippetDeployCancel").addEventListener("click", () => el("snippetDeployModal").classList.remove("show"));
+
+// -- autocomplete --------------------------------------------------------
+
+function snippetAutocompleteSuggestions() {
+  // Built fresh each open rather than cached, since the model can change
+  // between visits to this tab (re-analyze, deploys, deletions).
+  const out = [];
+  for (const n of state.model?.nodes || []) {
+    if (n.type === "column") out.push({ text: `${n.table}[${n.name}]`, sortKey: n.name, icon: "▤", table: n.table });
+    else if (n.type === "measure") out.push({ text: `[${n.name}]`, sortKey: n.name, icon: "ƒ", table: n.table });
+  }
+  return out;
+}
+
+// Computes the pixel position of a textarea's caret by mirroring its text
+// into an identically-styled hidden div — textareas have no native API for
+// this. Standard technique (same one the "textarea-caret-position" library
+// uses), inlined here since it's the only place in the app that needs it.
+function textareaCaretPixelPosition(textarea, position) {
+  const div = document.createElement("div");
+  const style = getComputedStyle(textarea);
+  const mirrored = [
+    "boxSizing", "width", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+    "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "fontStyle", "fontWeight", "fontSize",
+    "lineHeight", "fontFamily", "letterSpacing", "textTransform", "whiteSpace", "wordWrap",
+  ];
+  mirrored.forEach((p) => { div.style[p] = style[p]; });
+  div.style.position = "absolute";
+  div.style.visibility = "hidden";
+  div.style.whiteSpace = "pre-wrap";
+  div.style.wordWrap = "break-word";
+  div.style.top = "0";
+  div.style.left = "-9999px";
+  document.body.appendChild(div);
+  div.textContent = textarea.value.substring(0, position);
+  const span = document.createElement("span");
+  span.textContent = textarea.value.substring(position) || ".";
+  div.appendChild(span);
+  const rect = textarea.getBoundingClientRect();
+  const coords = {
+    top: rect.top + span.offsetTop - textarea.scrollTop,
+    left: rect.left + span.offsetLeft - textarea.scrollLeft,
+    lineHeight: parseFloat(style.lineHeight) || 16,
+  };
+  document.body.removeChild(div);
+  return coords;
+}
+
+// Finds the identifier-ish run of characters immediately before the caret
+// (letters/digits/underscore, plus [ ] ' for bracket/table refs) — that's
+// the partial text we filter suggestions against and replace on selection.
+function currentAutocompleteQuery(textarea) {
+  const pos = textarea.selectionStart;
+  const text = textarea.value;
+  let start = pos;
+  while (start > 0 && /[A-Za-z0-9_\[\]']/.test(text[start - 1])) start--;
+  return { start, end: pos, query: text.slice(start, pos) };
+}
+
+let acActiveIndex = -1;
+let acCurrentMatches = [];
+
+function hideSnippetAutocomplete() {
+  el("snippetAutocomplete").classList.remove("show");
+  acActiveIndex = -1;
+  acCurrentMatches = [];
+}
+
+function updateSnippetAutocomplete() {
+  const textarea = el("snippetDeployExpr");
+  const { query } = currentAutocompleteQuery(textarea);
+  const cleanQuery = query.replace(/[\[\]']/g, "");
+  if (!cleanQuery) { hideSnippetAutocomplete(); return; }
+
+  const all = snippetAutocompleteSuggestions();
+  const matches = all
+    .filter((s) => s.sortKey.toLowerCase().includes(cleanQuery.toLowerCase()))
+    .sort((a, b) => a.sortKey.length - b.sortKey.length) // shortest/closest match first
+    .slice(0, 30);
+
+  if (!matches.length) { hideSnippetAutocomplete(); return; }
+
+  acCurrentMatches = matches;
+  acActiveIndex = 0;
+  const box = el("snippetAutocomplete");
+  box.innerHTML = matches.map((m, i) =>
+    `<div class="sdm-ac-item${i === 0 ? " active" : ""}" data-i="${i}"><span class="ac-icon">${m.icon}</span>${escapeHtml(m.text)}${m.table ? `<span class="ac-table">${escapeHtml(m.table)}</span>` : ""}</div>`
+  ).join("");
+  box.querySelectorAll(".sdm-ac-item").forEach((item) => {
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // keep textarea focus so selectionStart is still valid
+      applyAutocompleteSelection(Number(item.dataset.i));
+    });
+  });
+
+  const pos = textareaCaretPixelPosition(textarea, textarea.selectionStart);
+  box.style.top = `${pos.top + pos.lineHeight + 4}px`;
+  box.style.left = `${pos.left}px`;
+  box.classList.add("show");
+}
+
+function applyAutocompleteSelection(index) {
+  const textarea = el("snippetDeployExpr");
+  const match = acCurrentMatches[index];
+  if (!match) return;
+  const { start, end } = currentAutocompleteQuery(textarea);
+  const before = textarea.value.slice(0, start);
+  const after = textarea.value.slice(end);
+  textarea.value = before + match.text + after;
+  const newPos = before.length + match.text.length;
+  textarea.setSelectionRange(newPos, newPos);
+  hideSnippetAutocomplete();
+  textarea.focus();
+}
+
+el("snippetDeployExpr").addEventListener("input", updateSnippetAutocomplete);
+el("snippetDeployExpr").addEventListener("click", hideSnippetAutocomplete);
+el("snippetDeployExpr").addEventListener("blur", () => setTimeout(hideSnippetAutocomplete, 150));
+el("snippetDeployExpr").addEventListener("keydown", (e) => {
+  if (!el("snippetAutocomplete").classList.contains("show")) return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    acActiveIndex = Math.min(acActiveIndex + 1, acCurrentMatches.length - 1);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    acActiveIndex = Math.max(acActiveIndex - 1, 0);
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault();
+    applyAutocompleteSelection(acActiveIndex);
+    return;
+  } else if (e.key === "Escape") {
+    hideSnippetAutocomplete();
+    return;
+  } else {
+    return;
+  }
+  el("snippetAutocomplete").querySelectorAll(".sdm-ac-item").forEach((item, i) => {
+    item.classList.toggle("active", i === acActiveIndex);
+  });
+});
 
 function highlightDax(expression, functionsUsed) {
   if (!functionsUsed || !functionsUsed.length) return escapeHtml(expression);

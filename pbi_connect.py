@@ -299,6 +299,49 @@ class PowerBIConnection:
         m.Expression = new_expression
         db.Model.SaveChanges()
 
+    def create_measure(self, table: str, name: str, expression: str) -> None:
+        """Adds a brand-new measure — used by the "Most Used DAX" library's
+        deploy action, where the DAX text is a generic template the user has
+        just edited to match their own table/column names. Refuses to
+        silently overwrite an existing measure of the same name; the caller
+        is expected to have taken a BIM backup first."""
+        from Microsoft.AnalysisServices.Tabular import Measure
+
+        db = self.tom_database()
+        model = db.Model
+        t = model.Tables.Find(table)
+        if t is None:
+            raise RuntimeError(f"Table not found: {table}")
+        if t.Measures.Find(name) is not None:
+            raise RuntimeError(f"A measure named '{name}' already exists on {table}. Pick a different name.")
+        m = Measure()
+        m.Name = name
+        m.Expression = expression
+        t.Measures.Add(m)
+        db.Model.SaveChanges()
+
+    def create_column(self, table: str, name: str, expression: str) -> None:
+        """Adds a brand-new calculated column — same deploy path as
+        create_measure, for the handful of snippets (e.g. Fiscal Year) that
+        are column expressions rather than measures. DataType is left
+        Automatic; Power BI infers it on the next model refresh, same as
+        when you type a calculated column directly in Desktop."""
+        from Microsoft.AnalysisServices.Tabular import CalculatedColumn, DataType
+
+        db = self.tom_database()
+        model = db.Model
+        t = model.Tables.Find(table)
+        if t is None:
+            raise RuntimeError(f"Table not found: {table}")
+        if t.Columns.Find(name) is not None:
+            raise RuntimeError(f"A column named '{name}' already exists on {table}. Pick a different name.")
+        c = CalculatedColumn()
+        c.Name = name
+        c.Expression = expression
+        c.DataType = DataType.Automatic
+        t.Columns.Add(c)
+        db.Model.SaveChanges()
+
     def set_measures_folder(self, folder_name: str, measures: list[dict] | None = None) -> int:
         """Set DisplayFolder on measures so they group into one folder in
         Power BI's field list. measures=None means every measure in the

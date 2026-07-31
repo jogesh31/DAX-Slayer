@@ -26,6 +26,7 @@ import pbi_connect
 from dax_explain import explain_expression, find_function_calls
 from dax_format import format_expression
 from dax_functions import all_functions
+from dax_snippets import all_snippets
 from graph import build_graph, dependents_of
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -308,6 +309,71 @@ def api_dax_functions():
                 for f in all_functions()
             ]
         })
+    except Exception as e:
+        return _err(e)
+
+
+@app.get("/api/dax-snippets")
+def api_dax_snippets():
+    """"Most Used DAX" — a curated library of common patterns (Date table,
+    time intelligence, ranking, etc.), not tied to whatever model happens to
+    be connected. functionsUsed is precomputed per snippet so the frontend
+    can reuse the same function-name highlighting/popover as everywhere
+    else in the tool."""
+    try:
+        out = []
+        for s in all_snippets():
+            uses = find_function_calls(s.dax)
+            expr_uses = find_function_calls(s.expression)
+            out.append({
+                "name": s.name,
+                "category": s.category,
+                "description": s.description,
+                "dax": s.dax,
+                "functionsUsed": [{"name": u.name, "start": u.start, "end": u.end} for u in uses],
+                "kind": s.kind,
+                "defaultObjectName": s.default_object_name,
+                "expression": s.expression,
+                "expressionFunctionsUsed": [{"name": u.name, "start": u.start, "end": u.end} for u in expr_uses],
+            })
+        return jsonify({"snippets": out})
+    except Exception as e:
+        return _err(e)
+
+
+@app.post("/api/deploy-snippet")
+def api_deploy_snippet():
+    """Creates a brand-new measure or calculated column from an edited
+    "Most Used DAX" template — the user has already renamed it and swapped
+    in their own table/column references. Same backup-first safety as
+    every other write path here."""
+    try:
+        conn = _require_conn()
+        body = request.get_json(force=True) or {}
+        kind = body.get("kind")
+        table = (body.get("table") or "").strip()
+        name = (body.get("name") or "").strip()
+        expression = (body.get("expression") or "").strip()
+
+        if kind not in ("measure", "column"):
+            raise RuntimeError(f"Can't deploy a snippet of kind '{kind}' directly — copy it in and add it by hand in Power BI Desktop.")
+        if not table:
+            raise RuntimeError("Pick a target table.")
+        if not name:
+            raise RuntimeError("Give it a name.")
+        if not expression:
+            raise RuntimeError("The expression is empty.")
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = os.path.join(BACKUP_DIR, f"snapshot_{timestamp}.bim")
+        conn.export_bim_snapshot(backup_path)
+
+        if kind == "measure":
+            conn.create_measure(table, name, expression)
+        else:
+            conn.create_column(table, name, expression)
+
+        return jsonify({"deployed": True, "backup": backup_path, "kind": kind, "table": table, "name": name})
     except Exception as e:
         return _err(e)
 

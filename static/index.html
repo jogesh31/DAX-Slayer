@@ -306,6 +306,23 @@
   .organize-row .om-folder.has-folder { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
   .organize-row.selected { background: var(--accent-soft); }
 
+  /* ---- Most Used DAX snippet library ---- */
+  .snippet-list { padding: 14px 16px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 22px; }
+  .snippet-category-title {
+    font-size: 11px; font-weight: 700; color: var(--text-faint); text-transform: uppercase;
+    letter-spacing: .6px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-soft);
+  }
+  .snippet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+  .snippet-card {
+    background: var(--bg-panel-2); border: 1px solid var(--border); border-radius: 11px; padding: 14px;
+  }
+  .snippet-card .sc-name { font-size: 13.5px; font-weight: 700; margin-bottom: 4px; }
+  .snippet-card .sc-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin-bottom: 10px; }
+  .snippet-card .sc-toolbar { display: flex; justify-content: flex-end; margin-top: 8px; }
+  .snippet-card .sc-copy { padding: 5px 11px; font-size: 11px; }
+  .snippet-card .sc-copy.copied { border-color: var(--good); color: var(--good); }
+  .snippet-card pre.dax { max-height: 260px; font-size: 12px; margin: 0; }
+
   /* the mini flow diagram: [ƒ measure] --arrow--> [outcome] */
   .mini-flow { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; flex-wrap: wrap; }
   .flow-node {
@@ -505,6 +522,26 @@
   .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   .warn-box { background: var(--warn-soft); border: 1px solid rgba(251,191,36,0.35); color: var(--warn); border-radius: 8px; padding: 10px 12px; font-size: 12px; margin-top: 10px; }
 
+  /* ---- snippet deploy modal ---- */
+  .sdm-row { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; margin-top: 4px; }
+  .sdm-label { font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; font-weight: 600; }
+  .sdm-editor-wrap { position: relative; }
+  #snippetDeployExpr {
+    width: 100%; min-height: 160px; resize: vertical; background: var(--code-bg); border: 1px solid var(--border-soft);
+    border-radius: 8px; padding: 10px 12px; font-family: Consolas, "Cascadia Code", monospace; font-size: 12.5px;
+    line-height: 1.6; color: var(--code-text); outline: none; box-sizing: border-box;
+  }
+  #snippetDeployExpr:focus { border-color: var(--accent); }
+  .sdm-autocomplete {
+    position: fixed; z-index: 90; display: none; min-width: 220px; max-width: 340px; max-height: 220px; overflow-y: auto;
+    background: var(--bg-panel-2); border: 1px solid var(--accent); border-radius: 8px; box-shadow: var(--shadow); padding: 4px;
+  }
+  .sdm-autocomplete.show { display: block; }
+  .sdm-ac-item { padding: 6px 9px; border-radius: 6px; font-size: 12px; font-family: Consolas, monospace; cursor: pointer; display: flex; align-items: center; gap: 7px; }
+  .sdm-ac-item:hover, .sdm-ac-item.active { background: var(--accent-soft); }
+  .sdm-ac-item .ac-icon { color: var(--text-faint); font-size: 10px; flex-shrink: 0; }
+  .sdm-ac-item .ac-table { margin-left: auto; font-size: 10px; color: var(--text-faint); font-family: "Segoe UI", sans-serif; }
+
   .toast {
     position: fixed; bottom: 20px; right: 20px; background: var(--bg-elevated); border: 1px solid var(--border);
     padding: 12px 16px; border-radius: 9px; box-shadow: var(--shadow); font-size: 12.5px; z-index: 60;
@@ -596,6 +633,7 @@
           <div class="view-tab active" data-view="chart">Dependency Chart</div>
           <div class="view-tab" data-view="bulk">Bulk Cleanup <span class="count-tag" id="bulkCountTag" style="display:none;"></span></div>
           <div class="view-tab" data-view="organize">Organize Folders</div>
+          <div class="view-tab" data-view="snippets">⭐ Most Used DAX</div>
         </div>
       </div>
 
@@ -645,6 +683,15 @@
         </div>
         <div class="organize-list" id="organizeList"></div>
       </div>
+
+      <div class="view-panel" id="viewSnippets" style="display:none;">
+        <div class="bulk-toolbar">
+          <input type="text" id="snippetSearchInput" placeholder="Search patterns… (e.g. date, ytd, rank)" style="width:260px" />
+          <div class="spacer"></div>
+          <span style="font-size:11px;color:var(--text-faint);">Common DAX patterns to copy into your own model — not tied to the connected report</span>
+        </div>
+        <div class="snippet-list" id="snippetList"></div>
+      </div>
     </div>
   </main>
 </div>
@@ -676,6 +723,37 @@
     <div class="actions">
       <button class="ghost" id="formatDeployCancel">Cancel</button>
       <button id="formatDeployConfirm">Save to Power BI</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="snippetDeployModal">
+  <div class="modal" style="width:640px;">
+    <h3>Deploy to Power BI</h3>
+    <p>Edit the name, target table, and DAX below to match your own model, then deploy — this creates a brand-new object, it won't touch anything existing. A backup snapshot is written first, same as any other change here.</p>
+
+    <div class="sdm-row">
+      <div>
+        <div class="sdm-label" id="snippetDeployKindLabel">Measure name</div>
+        <input type="text" id="snippetDeployName" style="width:100%;" />
+      </div>
+      <div>
+        <div class="sdm-label">Table</div>
+        <select id="snippetDeployTable" style="width:100%;"></select>
+      </div>
+    </div>
+
+    <div class="sdm-label" style="margin-top:12px;">DAX expression <span style="font-weight:400;color:var(--text-faint);">— start typing a column/measure name for suggestions</span></div>
+    <div class="sdm-editor-wrap">
+      <textarea id="snippetDeployExpr" spellcheck="false"></textarea>
+      <div class="sdm-autocomplete" id="snippetAutocomplete"></div>
+    </div>
+
+    <div class="warn-box" id="snippetDeployWarning" style="display:none;"></div>
+
+    <div class="actions">
+      <button class="ghost" id="snippetDeployCancel">Cancel</button>
+      <button id="snippetDeployConfirm">🚀 Deploy to Power BI</button>
     </div>
   </div>
 </div>
