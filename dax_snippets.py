@@ -25,9 +25,9 @@ class SnippetInfo:
 
 
 # Snippets whose `kind` isn't the default "measure". The two full Date
-# tables need a calculated-TABLE deploy path (a different TOM object shape
-# than measures/columns — Copy-only for now); Fiscal Year is a calculated
-# COLUMN on an existing Date table.
+# tables deploy as a calculated TABLE (a different TOM object shape —
+# Table + Partition/CalculatedPartitionSource, no target-table picker);
+# Fiscal Year is a calculated COLUMN on an existing Date table.
 _KIND_OVERRIDES = {
     "Date Table (Calendar)": "table",
     "Date Table (Auto range from Fact table)": "table",

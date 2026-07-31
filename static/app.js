@@ -601,13 +601,12 @@ function renderSnippets() {
     for (const s of byCategory[category]) {
       const card = document.createElement("div");
       card.className = "snippet-card";
-      const canDeploy = s.kind === "measure" || s.kind === "column";
       card.innerHTML = `
         <div class="sc-name">${escapeHtml(s.name)}</div>
         <div class="sc-desc">${escapeHtml(s.description)}</div>
         <pre class="dax">${highlightDax(s.dax, s.functionsUsed)}</pre>
         <div class="sc-toolbar">
-          ${canDeploy ? `<button class="sc-deploy">🚀 Deploy to Report</button>` : `<span style="font-size:11px;color:var(--text-faint);margin-right:auto;">Copy this into a new calculated table in Power BI Desktop</span>`}
+          <button class="sc-deploy">🚀 Deploy to Report</button>
           <button class="ghost sc-copy">📋 Copy</button>
         </div>
       `;
@@ -645,15 +644,17 @@ el("snippetSearchInput").addEventListener("input", (e) => {
 // already-connected model (state.model.nodes) — no extra API call needed.
 
 function openSnippetDeployModal(snippet) {
-  el("snippetDeployKindLabel").textContent = snippet.kind === "column" ? "Column name" : "Measure name";
+  const isTable = snippet.kind === "table";
+  el("snippetDeployKindLabel").textContent = snippet.kind === "column" ? "Column name" : isTable ? "Table name" : "Measure name";
   el("snippetDeployName").value = snippet.defaultObjectName;
   el("snippetDeployExpr").value = snippet.expression;
   el("snippetDeployWarning").style.display = "none";
+  el("snippetDeployTableRow").style.display = isTable ? "none" : "block";
 
   const tableSelect = el("snippetDeployTable");
   const tables = (state.model?.nodes || []).filter((n) => n.type === "table").map((n) => n.name).sort();
   tableSelect.innerHTML = tables.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-  if (!tables.length) {
+  if (!isTable && !tables.length) {
     el("snippetDeployWarning").style.display = "block";
     el("snippetDeployWarning").textContent = "No tables found — connect and analyze a report first.";
   }
@@ -663,11 +664,11 @@ function openSnippetDeployModal(snippet) {
 
   el("snippetDeployConfirm").onclick = async () => {
     const kind = snippet.kind;
-    const table = tableSelect.value;
+    const table = isTable ? "" : tableSelect.value;
     const name = el("snippetDeployName").value.trim();
     const expression = el("snippetDeployExpr").value.trim();
-    if (!table || !name || !expression) {
-      toast("Fill in a name, table, and expression before deploying.", "error");
+    if ((!isTable && !table) || !name || !expression) {
+      toast("Fill in a name" + (isTable ? "" : " and table") + " before deploying.", "error");
       return;
     }
     el("snippetDeployConfirm").disabled = true;
@@ -678,7 +679,7 @@ function openSnippetDeployModal(snippet) {
         body: JSON.stringify({ kind, table, name, expression }),
       });
       el("snippetDeployModal").classList.remove("show");
-      toast(`Deployed "${res.name}" to ${res.table}. Backup: ${res.backup}`, "success");
+      toast(`Deployed "${res.name}"${isTable ? "" : ` to ${res.table}`}. Backup: ${res.backup}`, "success");
       await analyze(); // pulls the new object into the sidebar/stats immediately
     } catch (e) {
       toast("Deploy failed: " + e.message, "error");

@@ -343,10 +343,10 @@ def api_dax_snippets():
 
 @app.post("/api/deploy-snippet")
 def api_deploy_snippet():
-    """Creates a brand-new measure or calculated column from an edited
-    "Most Used DAX" template — the user has already renamed it and swapped
-    in their own table/column references. Same backup-first safety as
-    every other write path here."""
+    """Creates a brand-new measure, calculated column, or calculated table
+    from an edited "Most Used DAX" template — the user has already renamed
+    it and swapped in their own table/column references. Same backup-first
+    safety as every other write path here."""
     try:
         conn = _require_conn()
         body = request.get_json(force=True) or {}
@@ -355,9 +355,9 @@ def api_deploy_snippet():
         name = (body.get("name") or "").strip()
         expression = (body.get("expression") or "").strip()
 
-        if kind not in ("measure", "column"):
-            raise RuntimeError(f"Can't deploy a snippet of kind '{kind}' directly — copy it in and add it by hand in Power BI Desktop.")
-        if not table:
+        if kind not in ("measure", "column", "table"):
+            raise RuntimeError(f"Unknown snippet kind: '{kind}'.")
+        if kind != "table" and not table:
             raise RuntimeError("Pick a target table.")
         if not name:
             raise RuntimeError("Give it a name.")
@@ -370,8 +370,10 @@ def api_deploy_snippet():
 
         if kind == "measure":
             conn.create_measure(table, name, expression)
-        else:
+        elif kind == "column":
             conn.create_column(table, name, expression)
+        else:
+            conn.create_table(name, expression)
 
         return jsonify({"deployed": True, "backup": backup_path, "kind": kind, "table": table, "name": name})
     except Exception as e:

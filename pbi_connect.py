@@ -342,6 +342,38 @@ class PowerBIConnection:
         t.Columns.Add(c)
         db.Model.SaveChanges()
 
+    def create_table(self, name: str, expression: str) -> None:
+        """Adds a brand-new calculated table (e.g. a Date table snippet) —
+        the third deploy path alongside create_measure/create_column.
+
+        Unlike a measure or column, a calculated table has no columns to
+        set up front: TOM only discovers its schema by actually evaluating
+        the DAX against the engine. So this is a two-step SaveChanges — the
+        first creates the table+partition shell, the second (after
+        RequestRefresh) is what makes the engine run the expression and
+        populate real columns. This is the same thing Power BI Desktop's UI
+        does the moment you finish typing a calculated table's DAX."""
+        from Microsoft.AnalysisServices.Tabular import CalculatedPartitionSource, Partition, RefreshType, Table
+
+        db = self.tom_database()
+        model = db.Model
+        if model.Tables.Find(name) is not None:
+            raise RuntimeError(f"A table named '{name}' already exists. Pick a different name.")
+
+        table = Table()
+        table.Name = name
+        partition = Partition()
+        partition.Name = name
+        source = CalculatedPartitionSource()
+        source.Expression = expression
+        partition.Source = source
+        table.Partitions.Add(partition)
+        model.Tables.Add(table)
+        db.Model.SaveChanges()
+
+        table.RequestRefresh(RefreshType.Full)
+        db.Model.SaveChanges()
+
     def set_measures_folder(self, folder_name: str, measures: list[dict] | None = None) -> int:
         """Set DisplayFolder on measures so they group into one folder in
         Power BI's field list. measures=None means every measure in the
