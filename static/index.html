@@ -400,7 +400,7 @@
   pre.dax .fn {
     color: var(--code-fn); font-weight: 700; cursor: pointer; border-bottom: 1px dashed var(--code-fn); opacity: 0.95;
   }
-  pre.dax .fn:hover { color: #ffe9ab; background: rgba(255,216,115,0.12); border-radius: 3px; }
+  pre.dax .fn:hover { background: var(--code-fn); color: var(--code-bg); border-radius: 3px; opacity: 1; }
 
   .explain-panel { margin-top: 10px; border: 1px solid var(--border-soft); border-radius: 8px; overflow: hidden; }
   .explain-header {
@@ -585,8 +585,8 @@
     display: none; max-width: 380px;
   }
   .toast.show { display: block; }
-  .toast.error { border-color: rgba(248,113,113,0.5); color: #ffb3b3; }
-  .toast.success { border-color: rgba(52,211,153,0.5); color: #b8f5dd; }
+  .toast.error { border-color: rgba(248,113,113,0.5); color: var(--danger); }
+  .toast.success { border-color: rgba(52,211,153,0.5); color: var(--good); }
 </style>
 </head>
 <body>
