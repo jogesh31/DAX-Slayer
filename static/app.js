@@ -847,15 +847,43 @@ function highlightDax(expression, functionsUsed) {
 }
 
 state.formatCache = {}; // nodeId -> {formatted, functionsUsed} from /api/format
+state.lintCache = {};   // nodeId -> {findings} from /api/dax-lint
+
+function renderLintPanel(n, lint) {
+  const findings = lint.findings || [];
+  const sevIcon = (s) => (s === "warning" ? "⚠" : "ℹ");
+  return `
+    <div class="explain-panel lint-panel">
+      <div class="explain-header" id="lintHeader">
+        <span>🔍 Lint ${findings.length ? `<span class="lint-count-badge">${findings.length}</span>` : ""}</span>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="explain-body" id="lintBody">
+        ${findings.length ? findings.map((f) => `
+          <div class="lint-finding lint-${f.severity}">
+            <div class="lf-head">
+              <span class="lf-sev">${sevIcon(f.severity)}</span>
+              <span class="lf-title">${escapeHtml(f.title)}</span>
+              <span class="lf-cat">${escapeHtml(f.category)}</span>
+            </div>
+            <div class="lf-msg">${escapeHtml(f.message)}</div>
+            <code class="lf-snippet">${escapeHtml(n.expression.slice(f.start, f.end))}</code>
+          </div>
+        `).join("") : `<div class="lint-clean">✓ No issues found by these checks.</div>`}
+      </div>
+    </div>
+  `;
+}
 
 function renderDaxExpression(box, n, nodeId) {
   // Render the raw (unhighlighted) expression immediately so there's no
   // blank flash, then upgrade to the beautified, highlighted version (plus
-  // the explain panel) once both /api/format and /api/explain resolve —
-  // cached per node so re-selecting the same object is instant.
+  // the explain + lint panels) once /api/format, /api/explain, and
+  // /api/dax-lint all resolve — each cached per node so re-selecting the
+  // same object is instant.
   box.innerHTML = `<pre class="dax">${escapeHtml(n.expression)}</pre>`;
 
-  const apply = (fmt, result) => {
+  const apply = (fmt, result, lint) => {
     // the user may have clicked to a different node before this resolved
     if (state.selectedId !== nodeId) return;
     const canDeploy = n.type === "measure";
@@ -874,12 +902,14 @@ function renderDaxExpression(box, n, nodeId) {
           ${result.functionsUsed && result.functionsUsed.length ? `<div class="explain-fnlist">${[...new Set(result.functionsUsed.map((f) => f.name))].map((name) => `<span class="fn-chip" data-fn="${escapeHtml(name)}">${escapeHtml(name)}</span>`).join("")}</div>` : ""}
         </div>
       </div>
+      ${renderLintPanel(n, lint)}
     `;
-    const header = box.querySelector("#explainHeader");
-    const body = box.querySelector("#explainBody");
-    header.addEventListener("click", () => {
-      header.classList.toggle("open");
-      body.classList.toggle("open");
+    box.querySelectorAll(".explain-header").forEach((header) => {
+      const body = header.nextElementSibling;
+      header.addEventListener("click", () => {
+        header.classList.toggle("open");
+        body.classList.toggle("open");
+      });
     });
     box.querySelectorAll(".fn, .fn-chip").forEach((el) => {
       el.addEventListener("click", (e) => showFnPopover(e.currentTarget, e.currentTarget.dataset.fn));
@@ -894,8 +924,10 @@ function renderDaxExpression(box, n, nodeId) {
     : api(`/api/format?id=${encodeURIComponent(nodeId)}`).then((fmt) => { state.formatCache[nodeId] = fmt; return fmt; });
   const explainP = state.explainCache[nodeId] ? Promise.resolve(state.explainCache[nodeId])
     : api(`/api/explain?id=${encodeURIComponent(nodeId)}`).then((result) => { state.explainCache[nodeId] = result; return result; });
+  const lintP = state.lintCache[nodeId] ? Promise.resolve(state.lintCache[nodeId])
+    : api(`/api/dax-lint?id=${encodeURIComponent(nodeId)}`).then((lint) => { state.lintCache[nodeId] = lint; return lint; });
 
-  Promise.all([formatP, explainP]).then(([fmt, result]) => apply(fmt, result)).catch(() => {}); // leave the plain, raw expression showing — still useful on its own
+  Promise.all([formatP, explainP, lintP]).then(([fmt, result, lint]) => apply(fmt, result, lint)).catch(() => {}); // leave the plain, raw expression showing — still useful on its own
 }
 
 function openFormatDeployModal(n, nodeId, formattedText) {
@@ -913,6 +945,7 @@ function openFormatDeployModal(n, nodeId, formattedText) {
       toast(`Saved formatted DAX for "${n.name}" to Power BI. Backup: ${res.backup}`, "success");
       delete state.explainCache[nodeId];
       delete state.formatCache[nodeId];
+      delete state.lintCache[nodeId];
       await analyze();
       renderDependencyChart(nodeId);
     } catch (e) {

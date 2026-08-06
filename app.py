@@ -26,6 +26,7 @@ import pbi_connect
 from dax_explain import explain_expression, find_function_calls
 from dax_format import format_expression
 from dax_functions import all_functions
+from dax_lint import lint_expression
 from dax_snippets import all_snippets
 from graph import build_graph, dependents_of
 
@@ -405,6 +406,44 @@ def _build_resolver(mgraph):
                 return f"the {name} column"
         return f"[{name}]"
     return resolve
+
+
+def _build_kind_resolver(mgraph):
+    """(table, name) -> "measure" | "column" | None, for lint rules that
+    need to know what kind of object a bracket reference actually is
+    (e.g. flagging a table-qualified reference to something that's really
+    a measure)."""
+    def resolve_kind(table, name):
+        node = mgraph.nodes.get(f"{table}[{name}]")
+        return node.node_type if node else None
+    return resolve_kind
+
+
+@app.get("/api/dax-lint")
+def api_dax_lint():
+    """Rule-based DAX best-practice linter for one object's expression —
+    same "no AI, no network call" design as /api/explain, deliberately:
+    a linter should give the same verdict on the same code every time."""
+    try:
+        node_id = request.args.get("id")
+        mgraph = STATE.get("graph")
+        if mgraph is None:
+            raise RuntimeError("Run /api/analyze first.")
+        node = mgraph.nodes.get(node_id)
+        if node is None:
+            raise RuntimeError(f"Unknown object: {node_id}")
+        findings = lint_expression(node.expression or "", resolve_kind=_build_kind_resolver(mgraph))
+        return jsonify({
+            "findings": [
+                {
+                    "ruleId": f.rule_id, "category": f.category, "severity": f.severity,
+                    "title": f.title, "message": f.message, "start": f.start, "end": f.end,
+                }
+                for f in findings
+            ],
+        })
+    except Exception as e:
+        return _err(e)
 
 
 @app.get("/api/explain")
