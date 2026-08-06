@@ -42,7 +42,10 @@ const toast = (msg, kind = "") => {
   const saved = localStorage.getItem("daxslayer-theme");
   const theme = saved || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
   document.documentElement.setAttribute("data-theme", theme);
-  const setIcon = () => { el("themeToggleBtn").textContent = document.documentElement.getAttribute("data-theme") === "light" ? "☀️" : "🌙"; };
+  const setIcon = () => {
+    const isLight = document.documentElement.getAttribute("data-theme") === "light";
+    el("themeToggleBtn").innerHTML = isLight ? "☀️ <span>Light mode</span>" : "🌙 <span>Dark mode</span>";
+  };
   setIcon();
   el("themeToggleBtn").addEventListener("click", () => {
     const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
@@ -855,7 +858,7 @@ function renderLintPanel(n, lint) {
   return `
     <div class="explain-panel lint-panel">
       <div class="explain-header" id="lintHeader">
-        <span>🔍 Lint ${findings.length ? `<span class="lint-count-badge">${findings.length}</span>` : ""}</span>
+        <span>🛠️ Suggestions ${findings.length ? `<span class="lint-count-badge">${findings.length}</span>` : ""}</span>
         <span class="chevron">▾</span>
       </div>
       <div class="explain-body" id="lintBody">

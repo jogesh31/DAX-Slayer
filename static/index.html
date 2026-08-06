@@ -239,7 +239,8 @@
   .view-tab { padding: 8px 16px; border-radius: 9px; font-size: 13px; font-weight: 500; color: var(--text-dim); cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all .14s; }
   .view-tab:hover { color: var(--text); }
   .view-tab.active { background: var(--accent); color: white; font-weight: 700; box-shadow: 0 6px 16px rgba(47,95,214,0.32); }
-  .view-tab .count-tag { background: rgba(255,255,255,0.18); color: white; }
+  .view-tab .count-tag { background: var(--bg-elevated-2); color: var(--text-dim); border: 1px solid var(--border); }
+  .view-tab.active .count-tag { background: rgba(255,255,255,0.22); color: white; border-color: transparent; }
 
   .view-panel { flex: 1; position: relative; min-height: 0; overflow: auto; }
 
@@ -636,7 +637,7 @@
 
   <div class="spacer"></div>
 
-  <button class="ghost icon-btn" id="themeToggleBtn" title="Switch theme">🌙</button>
+  <button class="ghost" id="themeToggleBtn" title="Switch theme">🌙 <span>Dark mode</span></button>
 
   <div class="header-divider"></div>
 
