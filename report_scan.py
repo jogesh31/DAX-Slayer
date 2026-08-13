@@ -62,7 +62,15 @@ class UsageLocation:
             if self.region:
                 base += f" ({self.region})"
             others = [f for f in dict.fromkeys(self.all_fields) if f != exclude]
-            if others:
+            if not others:
+                # Nothing else on it — for a card/KPI this means the field
+                # *is* the whole visual, which is worth saying plainly
+                # instead of silently dropping the description down to just
+                # "cardVisual on 'Page' page", which reads like a gap.
+                base += " — the only field on it"
+            elif len(others) <= 2:
+                base += f" — shown together with {' and '.join(others)}"
+            else:
                 shown = ", ".join(others[:3])
                 more = f" +{len(others) - 3} more" if len(others) > 3 else ""
                 base += f" — also shows: {shown}{more}"
