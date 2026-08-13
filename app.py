@@ -518,6 +518,65 @@ def api_format_deploy():
         return _err(e)
 
 
+def _measures_needing_format(mgraph):
+    """Every measure whose current expression differs from its beautified
+    form, as (node, formatted_text) pairs. Shared by the preview and
+    deploy-all endpoints so they can never disagree on the count."""
+    out = []
+    for node in mgraph.nodes.values():
+        if node.node_type != "measure":
+            continue
+        expr = node.expression or ""
+        formatted = format_expression(expr)
+        if formatted.strip() != expr.strip():
+            out.append((node, formatted))
+    return out
+
+
+@app.get("/api/format-all-preview")
+def api_format_all_preview():
+    """How many measures would change if "Format All" ran right now, and
+    their names — shown in the confirmation modal before anything is
+    actually written."""
+    try:
+        mgraph = STATE.get("graph")
+        if mgraph is None:
+            raise RuntimeError("Run /api/analyze first.")
+        pending = _measures_needing_format(mgraph)
+        return jsonify({
+            "count": len(pending),
+            "names": [f"{n.table}[{n.name}]" for n, _ in pending],
+        })
+    except Exception as e:
+        return _err(e)
+
+
+@app.post("/api/format-all-deploy")
+def api_format_all_deploy():
+    """Reformats every measure in the model that isn't already beautified
+    and writes them all back in one transaction. Same backup-first safety
+    as every other write path here — one snapshot covers the whole batch."""
+    try:
+        conn = _require_conn()
+        mgraph = STATE.get("graph")
+        if mgraph is None:
+            raise RuntimeError("Run /api/analyze first.")
+        pending = _measures_needing_format(mgraph)
+        if not pending:
+            return jsonify({"deployed": True, "count": 0, "backup": None})
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = os.path.join(BACKUP_DIR, f"snapshot_{timestamp}.bim")
+        conn.export_bim_snapshot(backup_path)
+
+        updates = [{"table": n.table, "name": n.name, "expression": formatted} for n, formatted in pending]
+        conn.set_measures_expressions(updates)
+
+        return jsonify({"deployed": True, "count": len(pending), "backup": backup_path})
+    except Exception as e:
+        return _err(e)
+
+
 @app.post("/api/deploy")
 def api_deploy():
     """Apply a batch of pending deletions to the live model.

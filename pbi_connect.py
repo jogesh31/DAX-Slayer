@@ -299,6 +299,24 @@ class PowerBIConnection:
         m.Expression = new_expression
         db.Model.SaveChanges()
 
+    def set_measures_expressions(self, updates: list[dict]) -> None:
+        """Bulk version of set_measure_expression — updates: list of
+        {"table", "name", "expression"}. Applies every change, then
+        SaveChanges() once as a single transaction (same all-or-nothing
+        shape as delete_objects), so "Format All Measures" either lands
+        cleanly or leaves the live model completely untouched."""
+        db = self.tom_database()
+        model = db.Model
+        for u in updates:
+            t = model.Tables.Find(u["table"])
+            if t is None:
+                raise RuntimeError(f"Table not found: {u['table']}")
+            m = t.Measures.Find(u["name"])
+            if m is None:
+                raise RuntimeError(f"Measure not found: {u['table']}[{u['name']}]")
+            m.Expression = u["expression"]
+        db.Model.SaveChanges()
+
     def create_measure(self, table: str, name: str, expression: str) -> None:
         """Adds a brand-new measure — used by the "Most Used DAX" library's
         deploy action, where the DAX text is a generic template the user has

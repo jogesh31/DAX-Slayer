@@ -958,6 +958,51 @@ function openFormatDeployModal(n, nodeId, formattedText) {
 }
 el("formatDeployCancel").addEventListener("click", () => el("formatDeployModal").classList.remove("show"));
 
+// ==================== FORMAT ALL MEASURES ====================
+//
+// Same beautifier as the per-measure "Save formatted DAX" action, just
+// batched across the whole model in one backup + one TOM transaction
+// instead of one round-trip per measure.
+
+el("formatAllBtn").addEventListener("click", async () => {
+  el("formatAllModal").classList.add("show");
+  el("formatAllSummary").textContent = "Checking which measures need reformatting…";
+  el("formatAllList").style.display = "none";
+  el("formatAllConfirm").disabled = true;
+  try {
+    const preview = await api("/api/format-all-preview");
+    if (preview.count === 0) {
+      el("formatAllSummary").textContent = "Every measure already matches its beautified formatting — nothing to do.";
+      return;
+    }
+    el("formatAllSummary").textContent = `${preview.count} measure(s) will be reformatted and saved to Power BI:`;
+    el("formatAllList").style.display = "block";
+    el("formatAllList").innerHTML = preview.names.map((n) => escapeHtml(n)).join("<br>");
+    el("formatAllConfirm").disabled = false;
+  } catch (e) {
+    el("formatAllSummary").textContent = "Couldn't check measures: " + e.message;
+  }
+});
+
+el("formatAllConfirm").addEventListener("click", async () => {
+  el("formatAllConfirm").disabled = true;
+  try {
+    const res = await api("/api/format-all-deploy", { method: "POST" });
+    el("formatAllModal").classList.remove("show");
+    toast(`Reformatted ${res.count} measure(s). Backup: ${res.backup}`, "success");
+    state.explainCache = {};
+    state.formatCache = {};
+    state.lintCache = {};
+    await analyze();
+  } catch (e) {
+    toast("Format All failed: " + e.message, "error");
+  } finally {
+    el("formatAllConfirm").disabled = false;
+  }
+});
+
+el("formatAllCancel").addEventListener("click", () => el("formatAllModal").classList.remove("show"));
+
 function showFnPopover(anchorEl, fnName) {
   const pop = el("fnPopover");
   const info = state.daxFunctions[fnName];

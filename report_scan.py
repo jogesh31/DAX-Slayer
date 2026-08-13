@@ -43,6 +43,13 @@ class UsageLocation:
     # the report author, so this is the only way to describe "what does this
     # visual actually show" without one: list what else is on it.
     all_fields: list = field(default_factory=list)
+    # Where on the page, in plain words ("top-left", "center", ...). Computed
+    # from the visual's on-canvas position — unlike visual_title (which is
+    # only ever populated if someone explicitly typed a custom title; Power
+    # BI's auto-generated titles from field names are never written to the
+    # file), position data is always present, so this is the one location
+    # hint that reliably helps someone actually find the visual on the page.
+    region: str | None = None
 
     def label(self, exclude: str | None = None) -> str:
         if self.kind == "visual":
@@ -52,6 +59,8 @@ class UsageLocation:
                 base += f' ("{self.visual_title}")'
             if self.page:
                 base += f" on '{self.page}' page"
+            if self.region:
+                base += f" ({self.region})"
             others = [f for f in dict.fromkeys(self.all_fields) if f != exclude]
             if others:
                 shown = ", ".join(others[:3])
@@ -98,6 +107,29 @@ def _visual_title(visual_json: dict) -> str | None:
     return None
 
 
+def _visual_region(visual_json: dict, page_width: float | None, page_height: float | None) -> str | None:
+    """A coarse "top-left" / "center" / "bottom-right" description of where
+    on the page a visual sits, from its on-canvas position — a 3x3-grid
+    read of the visual's center point against the page's dimensions.
+    Unlike a title, `position` is written for every single visual, so this
+    is the one location hint that's never blank."""
+    try:
+        pos = visual_json.get("position")
+        if not pos or not page_width or not page_height:
+            return None
+        cx = pos["x"] + pos.get("width", 0) / 2
+        cy = pos["y"] + pos.get("height", 0) / 2
+        col = min(2, int(cx / page_width * 3))
+        row = min(2, int(cy / page_height * 3))
+        if row == 1 and col == 1:
+            return "center"
+        row_word = ["top", "middle", "bottom"][row]
+        col_word = ["left", "center", "right"][col]
+        return col_word if row == 1 else (row_word if col == 1 else f"{row_word}-{col_word}")
+    except (KeyError, TypeError, ZeroDivisionError):
+        return None
+
+
 def _classify_path(report_folder: str, rel: str) -> UsageLocation:
     """Turn a relative file path like
     definition/pages/<pageId>/visuals/<visualId>/visual.json
@@ -109,22 +141,27 @@ def _classify_path(report_folder: str, rel: str) -> UsageLocation:
         page_idx = parts.index("pages") + 1 if "pages" in parts else None
         page_id = parts[page_idx] if page_idx is not None else None
         page_name = None
+        page_width = page_height = None
         if page_id:
             page_json_path = os.path.join(report_folder, "definition", "pages", page_id, "page.json")
             try:
                 with open(page_json_path, "r", encoding="utf-8") as f:
-                    page_name = json.load(f).get("displayName")
+                    page_json = json.load(f)
+                page_name = page_json.get("displayName")
+                page_width = page_json.get("width")
+                page_height = page_json.get("height")
             except (OSError, json.JSONDecodeError):
                 pass
-        visual_type, visual_title = None, None
+        visual_type, visual_title, region = None, None, None
         try:
             with open(os.path.join(report_folder, rel), "r", encoding="utf-8") as f:
                 vjson = json.load(f)
             visual_type = vjson.get("visual", {}).get("visualType")
             visual_title = _visual_title(vjson)
+            region = _visual_region(vjson, page_width, page_height)
         except (OSError, json.JSONDecodeError):
             pass
-        return UsageLocation(page=page_name, visual_type=visual_type, visual_title=visual_title, kind="visual")
+        return UsageLocation(page=page_name, visual_type=visual_type, visual_title=visual_title, kind="visual", region=region)
 
     if rel.endswith("page.json") and "pages" in parts:
         page_idx = parts.index("pages") + 1
