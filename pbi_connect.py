@@ -283,38 +283,45 @@ class PowerBIConnection:
 
         db.Model.SaveChanges()
 
+    def _find_expression_object(self, model, kind: str, table: str, name: str):
+        t = model.Tables.Find(table)
+        if t is None:
+            raise RuntimeError(f"Table not found: {table}")
+        obj = t.Measures.Find(name) if kind == "measure" else t.Columns.Find(name)
+        if obj is None:
+            noun = "Measure" if kind == "measure" else "Column"
+            raise RuntimeError(f"{noun} not found: {table}[{name}]")
+        return obj
+
     def set_measure_expression(self, table: str, name: str, new_expression: str) -> None:
         """Overwrite a measure's DAX with reformatted (or otherwise edited)
         text — same shape as the DisplayFolder write: find the object, set
         the property, SaveChanges once. Callers are expected to have taken
         a BIM backup first, same as every other write path in this file."""
         db = self.tom_database()
-        model = db.Model
-        t = model.Tables.Find(table)
-        if t is None:
-            raise RuntimeError(f"Table not found: {table}")
-        m = t.Measures.Find(name)
-        if m is None:
-            raise RuntimeError(f"Measure not found: {table}[{name}]")
-        m.Expression = new_expression
+        obj = self._find_expression_object(db.Model, "measure", table, name)
+        obj.Expression = new_expression
         db.Model.SaveChanges()
 
-    def set_measures_expressions(self, updates: list[dict]) -> None:
-        """Bulk version of set_measure_expression — updates: list of
-        {"table", "name", "expression"}. Applies every change, then
-        SaveChanges() once as a single transaction (same all-or-nothing
-        shape as delete_objects), so "Format All Measures" either lands
-        cleanly or leaves the live model completely untouched."""
+    def set_column_expression(self, table: str, name: str, new_expression: str) -> None:
+        """Same as set_measure_expression, for a calculated column."""
+        db = self.tom_database()
+        obj = self._find_expression_object(db.Model, "column", table, name)
+        obj.Expression = new_expression
+        db.Model.SaveChanges()
+
+    def set_expressions_bulk(self, updates: list[dict]) -> None:
+        """Bulk version of set_measure_expression/set_column_expression —
+        updates: list of {"kind": "measure"|"column", "table", "name",
+        "expression"}. Applies every change, then SaveChanges() once as a
+        single transaction (same all-or-nothing shape as delete_objects),
+        so "Format All" either lands cleanly or leaves the live model
+        completely untouched."""
         db = self.tom_database()
         model = db.Model
         for u in updates:
-            t = model.Tables.Find(u["table"])
-            if t is None:
-                raise RuntimeError(f"Table not found: {u['table']}")
-            m = t.Measures.Find(u["name"])
-            if m is None:
-                raise RuntimeError(f"Measure not found: {u['table']}[{u['name']}]")
-            m.Expression = u["expression"]
+            obj = self._find_expression_object(model, u["kind"], u["table"], u["name"])
+            obj.Expression = u["expression"]
         db.Model.SaveChanges()
 
     def create_measure(self, table: str, name: str, expression: str) -> None:

@@ -490,10 +490,21 @@ def api_format():
         return _err(e)
 
 
+def _expr_kind(node) -> str | None:
+    """"measure" | "column" (calculated only) | None (not something with a
+    settable Expression — a plain source column, a table, etc.)."""
+    if node.node_type == "measure":
+        return "measure"
+    if node.node_type == "column" and node.is_calculated:
+        return "column"
+    return None
+
+
 @app.post("/api/format-deploy")
 def api_format_deploy():
-    """Reformats a measure's DAX and writes the beautified text back to the
-    live model — same backup-first safety as every other write path here."""
+    """Reformats a measure's or calculated column's DAX and writes the
+    beautified text back to the live model — same backup-first safety as
+    every other write path here."""
     try:
         conn = _require_conn()
         body = request.get_json(force=True) or {}
@@ -502,8 +513,9 @@ def api_format_deploy():
         if mgraph is None:
             raise RuntimeError("Run /api/analyze first.")
         node = mgraph.nodes.get(node_id)
-        if node is None or node.node_type != "measure":
-            raise RuntimeError(f"Unknown measure: {node_id}")
+        kind = _expr_kind(node) if node else None
+        if kind is None:
+            raise RuntimeError(f"Unknown measure or calculated column: {node_id}")
 
         formatted = format_expression(node.expression or "")
 
@@ -511,41 +523,50 @@ def api_format_deploy():
         backup_path = os.path.join(BACKUP_DIR, f"snapshot_{timestamp}.bim")
         conn.export_bim_snapshot(backup_path)
 
-        conn.set_measure_expression(node.table, node.name, formatted)
+        if kind == "measure":
+            conn.set_measure_expression(node.table, node.name, formatted)
+        else:
+            conn.set_column_expression(node.table, node.name, formatted)
 
         return jsonify({"deployed": True, "backup": backup_path, "formatted": formatted})
     except Exception as e:
         return _err(e)
 
 
-def _measures_needing_format(mgraph):
-    """Every measure whose current expression differs from its beautified
-    form, as (node, formatted_text) pairs. Shared by the preview and
-    deploy-all endpoints so they can never disagree on the count."""
+def _objects_needing_format(mgraph):
+    """Every measure and calculated column whose current expression
+    differs from its beautified form, as (node, kind, formatted_text)
+    triples. Shared by the preview and deploy-all endpoints so they can
+    never disagree on the count."""
     out = []
     for node in mgraph.nodes.values():
-        if node.node_type != "measure":
+        kind = _expr_kind(node)
+        if kind is None:
             continue
         expr = node.expression or ""
         formatted = format_expression(expr)
         if formatted.strip() != expr.strip():
-            out.append((node, formatted))
+            out.append((node, kind, formatted))
     return out
 
 
 @app.get("/api/format-all-preview")
 def api_format_all_preview():
-    """How many measures would change if "Format All" ran right now, and
-    their names — shown in the confirmation modal before anything is
-    actually written."""
+    """How many measures/calculated columns would change if "Format All"
+    ran right now, and their names — shown in the confirmation modal
+    before anything is actually written."""
     try:
         mgraph = STATE.get("graph")
         if mgraph is None:
             raise RuntimeError("Run /api/analyze first.")
-        pending = _measures_needing_format(mgraph)
+        pending = _objects_needing_format(mgraph)
+        measure_count = sum(1 for _, k, _ in pending if k == "measure")
+        column_count = sum(1 for _, k, _ in pending if k == "column")
         return jsonify({
             "count": len(pending),
-            "names": [f"{n.table}[{n.name}]" for n, _ in pending],
+            "measureCount": measure_count,
+            "columnCount": column_count,
+            "names": [f"{n.table}[{n.name}]" + (" (column)" if k == "column" else "") for n, k, _ in pending],
         })
     except Exception as e:
         return _err(e)
@@ -553,15 +574,16 @@ def api_format_all_preview():
 
 @app.post("/api/format-all-deploy")
 def api_format_all_deploy():
-    """Reformats every measure in the model that isn't already beautified
-    and writes them all back in one transaction. Same backup-first safety
-    as every other write path here — one snapshot covers the whole batch."""
+    """Reformats every measure and calculated column in the model that
+    isn't already beautified and writes them all back in one transaction.
+    Same backup-first safety as every other write path here — one
+    snapshot covers the whole batch."""
     try:
         conn = _require_conn()
         mgraph = STATE.get("graph")
         if mgraph is None:
             raise RuntimeError("Run /api/analyze first.")
-        pending = _measures_needing_format(mgraph)
+        pending = _objects_needing_format(mgraph)
         if not pending:
             return jsonify({"deployed": True, "count": 0, "backup": None})
 
@@ -569,8 +591,8 @@ def api_format_all_deploy():
         backup_path = os.path.join(BACKUP_DIR, f"snapshot_{timestamp}.bim")
         conn.export_bim_snapshot(backup_path)
 
-        updates = [{"table": n.table, "name": n.name, "expression": formatted} for n, formatted in pending]
-        conn.set_measures_expressions(updates)
+        updates = [{"kind": k, "table": n.table, "name": n.name, "expression": formatted} for n, k, formatted in pending]
+        conn.set_expressions_bulk(updates)
 
         return jsonify({"deployed": True, "count": len(pending), "backup": backup_path})
     except Exception as e:

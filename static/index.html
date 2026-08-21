@@ -697,7 +697,7 @@
           <div class="chip active" data-bulk-filter="unused">Truly unused</div>
           <div class="chip" data-bulk-filter="all">All not on a visual (incl. still used by other measures)</div>
           <div class="spacer"></div>
-          <button class="ghost" id="formatAllBtn">🪄 Format All Measures</button>
+          <button class="ghost" id="formatAllBtn">🪄 Format All Measures &amp; Columns</button>
         </div>
         <div class="bulk-cards-wrap" id="bulkCardsWrap"></div>
         <div class="empty-state" id="bulkEmpty" style="display:none;"><div class="big">✅</div>Nothing unreferenced — every measure is used somewhere.</div>
@@ -768,10 +768,10 @@
 
 <div class="modal-backdrop" id="formatAllModal">
   <div class="modal" style="width:520px;">
-    <h3>Format all measures</h3>
-    <p id="formatAllSummary">Checking which measures need reformatting…</p>
+    <h3>Format all measures &amp; calculated columns</h3>
+    <p id="formatAllSummary">Checking which measures and calculated columns need reformatting…</p>
     <div id="formatAllList" style="max-height:220px;overflow-y:auto;font-size:12px;color:var(--text-dim);font-family:Consolas,monospace;background:var(--code-bg);border:1px solid var(--border-soft);border-radius:8px;padding:10px;margin-top:8px;display:none;"></div>
-    <div class="warn-box">Only whitespace/layout changes — the calculation logic of every measure is untouched. One backup snapshot covers the whole batch.</div>
+    <div class="warn-box">Only whitespace/layout changes — the calculation logic of every measure and column is untouched. One backup snapshot covers the whole batch.</div>
     <div class="actions">
       <button class="ghost" id="formatAllCancel">Cancel</button>
       <button id="formatAllConfirm" disabled>Format &amp; Save All</button>

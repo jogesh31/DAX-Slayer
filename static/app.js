@@ -889,7 +889,7 @@ function renderDaxExpression(box, n, nodeId) {
   const apply = (fmt, result, lint) => {
     // the user may have clicked to a different node before this resolved
     if (state.selectedId !== nodeId) return;
-    const canDeploy = n.type === "measure";
+    const canDeploy = n.type === "measure" || (n.type === "column" && n.isCalculated);
     box.innerHTML = `
       <pre class="dax">${highlightDax(fmt.formatted, fmt.functionsUsed)}</pre>
       ${canDeploy ? `
@@ -899,7 +899,7 @@ function renderDaxExpression(box, n, nodeId) {
         </div>
       ` : ""}
       <div class="explain-panel">
-        <div class="explain-header" id="explainHeader"><span>💡 Explain this measure</span><span class="chevron">▾</span></div>
+        <div class="explain-header" id="explainHeader"><span>💡 Explain this ${n.type === "column" ? "column" : "measure"}</span><span class="chevron">▾</span></div>
         <div class="explain-body" id="explainBody">
           ${escapeHtml(result.summary)}
           ${result.functionsUsed && result.functionsUsed.length ? `<div class="explain-fnlist">${[...new Set(result.functionsUsed.map((f) => f.name))].map((name) => `<span class="fn-chip" data-fn="${escapeHtml(name)}">${escapeHtml(name)}</span>`).join("")}</div>` : ""}
@@ -966,21 +966,24 @@ el("formatDeployCancel").addEventListener("click", () => el("formatDeployModal")
 
 el("formatAllBtn").addEventListener("click", async () => {
   el("formatAllModal").classList.add("show");
-  el("formatAllSummary").textContent = "Checking which measures need reformatting…";
+  el("formatAllSummary").textContent = "Checking which measures and calculated columns need reformatting…";
   el("formatAllList").style.display = "none";
   el("formatAllConfirm").disabled = true;
   try {
     const preview = await api("/api/format-all-preview");
     if (preview.count === 0) {
-      el("formatAllSummary").textContent = "Every measure already matches its beautified formatting — nothing to do.";
+      el("formatAllSummary").textContent = "Everything already matches its beautified formatting — nothing to do.";
       return;
     }
-    el("formatAllSummary").textContent = `${preview.count} measure(s) will be reformatted and saved to Power BI:`;
+    const parts = [];
+    if (preview.measureCount) parts.push(`${preview.measureCount} measure(s)`);
+    if (preview.columnCount) parts.push(`${preview.columnCount} calculated column(s)`);
+    el("formatAllSummary").textContent = `${parts.join(" and ")} will be reformatted and saved to Power BI:`;
     el("formatAllList").style.display = "block";
     el("formatAllList").innerHTML = preview.names.map((n) => escapeHtml(n)).join("<br>");
     el("formatAllConfirm").disabled = false;
   } catch (e) {
-    el("formatAllSummary").textContent = "Couldn't check measures: " + e.message;
+    el("formatAllSummary").textContent = "Couldn't check measures and columns: " + e.message;
   }
 });
 
@@ -989,7 +992,7 @@ el("formatAllConfirm").addEventListener("click", async () => {
   try {
     const res = await api("/api/format-all-deploy", { method: "POST" });
     el("formatAllModal").classList.remove("show");
-    toast(`Reformatted ${res.count} measure(s). Backup: ${res.backup}`, "success");
+    toast(`Reformatted ${res.count} object(s). Backup: ${res.backup}`, "success");
     state.explainCache = {};
     state.formatCache = {};
     state.lintCache = {};
