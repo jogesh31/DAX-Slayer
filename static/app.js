@@ -1093,9 +1093,9 @@ function drawConnectorLines(wrap, svg, dependsOnIds, usedByIds, centerCard) {
   const centerRight = { x: centerRect.right - wrapRect.left, y: centerRect.top - wrapRect.top + centerRect.height / 2 };
 
   const drawPath = (x1, y1, x2, y2, color) => {
-    const midX = (x1 + x2) / 2;
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`);
+    const offsetX = (x2 - x1) * 0.2;
+    path.setAttribute("d", `M ${x1} ${y1} C ${x1 + offsetX} ${y1}, ${x2 - offsetX} ${y2}, ${x2} ${y2}`);
     path.setAttribute("stroke", color);
     path.setAttribute("stroke-width", "1.5");
     path.setAttribute("fill", "none");
